@@ -1,0 +1,10 @@
+name = "IzhNet"
+uuid = "239dbd71-4879-4542-8e13-b36a9ae7fb4b"
+authors = ["cj-torres <52362149+cj-torres@users.noreply.github.com>"]
+version = "0.1.0"
+
+[deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
