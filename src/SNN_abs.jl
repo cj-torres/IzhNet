@@ -27,6 +27,7 @@ struct IzhParameters{T <: AbstractArray{<:AbstractFloat}}
 
     function IzhParameters(a::T, b::T, c::T, d::T)
         @assert length(a) == length(b) == length(c) == length(d)
+        new(a, b, c, d)
     end
 end
 

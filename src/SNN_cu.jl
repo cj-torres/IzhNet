@@ -6,26 +6,26 @@ using("SNN_abs.jl")
 
 abstract type CudaIzhNetwork <: IzhNetwork end
 
-struct Reward
+struct Reward{T<:AbstractFloat}
     # i.e. "dopamine"
 
     # amount of "reward" present in the system
-    reward::AbstractFloat
+    reward::T
 
     # constant decay parameter
-    decay::AbstractFloat
+    decay::T
 end
 
-mutable struct CudaEligibilityTrace
-    pre_trace::CuArray{<:AbstractFloat, 1}
-    post_trace::CuArray{<:AbstractFloat, 1}
-    e_trace::CuArray{<:AbstractFloat, 2}
-    const pre_increment::AbstractFloat
-    const post_increment::AbstractFloat
-    const constants::CuArray{<:AbstractFloat, 2}
-    const pre_decay::AbstractFloat
-    const post_decay::AbstractFloat
-    const e_decay::AbstractFloat
+mutable struct CudaEligibilityTrace{T<:AbstractFloat}
+    pre_trace::CuArray{T, 1}
+    post_trace::CuArray{T, 1}
+    e_trace::CuArray{T, 2}
+    const pre_increment::T
+    const post_increment::T
+    const constants::CuArray{T, 2}
+    const pre_decay::T
+    const post_decay::T
+    const e_decay::T
 end
 
 
@@ -34,8 +34,9 @@ function step_reward(reward::Reward, reward_injection::AbstractFloat)
 end
 
 
-function weight_update(trace::CudaEligibilityTrace, reward::Reward)
-    return reward.reward * trace.e_trace 
+function weight_update!(network::CudaIzhNetwork, trace::CudaEligibilityTrace, reward::Reward)
+    network.S = network.S + reward.reward * trace.e_trace 
+    return network
 end
 
 function step_trace!(trace::CudaEligibilityTrace, firings::CuArray{Bool, 1}, mask::CuArray{Bool, 2})
@@ -68,6 +69,8 @@ function step_trace!(trace::CudaEligibilityTrace, firings::CuArray{Bool, 1})
     end
 
     trace.e_trace .= trace.e_trace .- trace.e_trace ./ trace.e_decay
+
+    return trace
 end
 
 
@@ -86,29 +89,29 @@ end
 #    trace.e_trace .= trace.e_trace .- trace.e_trace ./ trace.e_decay
 #end
 
-mutable struct CudaUnmaskedIzhNetwork <: CudaIzhNetwork
+mutable struct CudaUnmaskedIzhNetwork{T<:AbstractFloat} <: CudaIzhNetwork
     const N::Integer
-    const a::CuArray{<:AbstractFloat, 1}
-    const b::CuArray{<:AbstractFloat, 1}
-    const c::CuArray{<:AbstractFloat, 1}
-    const d::CuArray{<:AbstractFloat, 1}
-    v::CuArray{<:AbstractFloat, 1}
-    u::CuArray{<:AbstractFloat, 1}
-    S::CuArray{<:AbstractFloat, 2}
-    S_ub::CuArray{<:AbstractFloat, 2}
-    S_lb::CuArray{<:AbstractFloat, 2}
+    const a::CuArray{T, 1}
+    const b::CuArray{T, 1}
+    const c::CuArray{T, 1}
+    const d::CuArray{T, 1}
+    v::CuArray{T, 1}
+    u::CuArray{T, 1}
+    S::CuArray{T, 2}
+    S_ub::CuArray{T, 2}
+    S_lb::CuArray{T, 2}
     fired::CuArray{Bool, 1}
 
     function CudaUnmaskedIzhNetwork(N::Integer, 
-                                a::CuArray{<:AbstractFloat, 1}, 
-                                b::CuArray{<:AbstractFloat, 1}, 
-                                c::CuArray{<:AbstractFloat, 1}, 
-                                d::CuArray{<:AbstractFloat, 1}, 
-                                v::CuArray{<:AbstractFloat, 1}, 
-                                u::CuArray{<:AbstractFloat, 1}, 
-                                S::CuArray{<:AbstractFloat, 2}, 
-                                S_ub::CuArray{<:AbstractFloat, 2}, 
-                                S_lb::CuArray{<:AbstractFloat, 2}, 
+                                a::CuArray{T, 1}, 
+                                b::CuArray{T, 1}, 
+                                c::CuArray{T, 1}, 
+                                d::CuArray{T, 1}, 
+                                v::CuArray{T, 1}, 
+                                u::CuArray{T, 1}, 
+                                S::CuArray{T, 2}, 
+                                S_ub::CuArray{T, 2}, 
+                                S_lb::CuArray{T, 2}, 
                                 fired::CuArray{Bool, 1})
         @assert length(a) == N
         @assert length(b) == N
@@ -121,35 +124,35 @@ mutable struct CudaUnmaskedIzhNetwork <: CudaIzhNetwork
         @assert size(S_ub) == (N, N)
         @assert length(fired) == N
 
-        return new(N, a, b, c, d, v, u, S, S_ub, S_lb, fired)
+        return new{T}(N, a, b, c, d, v, u, S, S_ub, S_lb, fired)
     end
 end
 
 
-mutable struct CudaMaskedIzhNetwork <: CudaIzhNetwork
+mutable struct CudaMaskedIzhNetwork{T<:AbstractFloat} <: CudaIzhNetwork
     const N::Integer
-    const a::CuArray{<:AbstractFloat, 1}
-    const b::CuArray{<:AbstractFloat, 1}
-    const c::CuArray{<:AbstractFloat, 1}
-    const d::CuArray{<:AbstractFloat, 1}
-    v::CuArray{<:AbstractFloat, 1}
-    u::CuArray{<:AbstractFloat, 1}
-    S::CuArray{<:AbstractFloat, 2}
-    S_ub::CuArray{<:AbstractFloat, 2}
-    S_lb::CuArray{<:AbstractFloat, 2}
+    const a::CuArray{T, 1}
+    const b::CuArray{T, 1}
+    const c::CuArray{T, 1}
+    const d::CuArray{T, 1}
+    v::CuArray{T, 1}
+    u::CuArray{T, 1}
+    S::CuArray{T, 2}
+    S_ub::CuArray{T, 2}
+    S_lb::CuArray{T, 2}
     mask::CuArray{Bool, 2}
     fired::CuArray{Bool, 1}
 
     function CudaMaskedIzhNetwork(N::Integer, 
-                                a::CuArray{<:AbstractFloat, 1}, 
-                                b::CuArray{<:AbstractFloat, 1}, 
-                                c::CuArray{<:AbstractFloat, 1}, 
-                                d::CuArray{<:AbstractFloat, 1}, 
-                                v::CuArray{<:AbstractFloat, 1}, 
-                                u::CuArray{<:AbstractFloat, 1}, 
-                                S::CuArray{<:AbstractFloat, 2}, 
-                                S_ub::CuArray{<:AbstractFloat, 2}, 
-                                S_lb::CuArray{<:AbstractFloat, 2}, 
+                                a::CuArray{T, 1}, 
+                                b::CuArray{T, 1}, 
+                                c::CuArray{T, 1}, 
+                                d::CuArray{T, 1}, 
+                                v::CuArray{T, 1}, 
+                                u::CuArray{T, 1}, 
+                                S::CuArray{T, 2}, 
+                                S_ub::CuArray{T, 2}, 
+                                S_lb::CuArray{T, 2}, 
                                 mask::CuArray{Bool, 2}, 
                                 fired::CuArray{Bool, 1})
         @assert length(a) == N
@@ -162,7 +165,7 @@ mutable struct CudaMaskedIzhNetwork <: CudaIzhNetwork
         @assert size(mask) == (N, N)
         @assert length(fired) == N
 
-        return new(N, a, b, c, d, v, u, S, S_ub, S_lb, mask, fired)
+        return new{T}(N, a, b, c, d, v, u, S, S_ub, S_lb, mask, fired)
     end
 end
 
@@ -186,6 +189,8 @@ function step_network!(in_voltage::CuArray{<:AbstractFloat, 1}, network::CudaUnm
 
     # update recovery parameter u
     network.u .= network.u .+ network.a .* (network.b .* network.v .- network.u)
+
+    return network
 end
 
 
@@ -208,4 +213,6 @@ function step_network!(in_voltage::CuArray{<:AbstractFloat, 1}, network::CudaMas
 
     # update recovery parameter u
     network.u .= network.u .+ network.a .* (network.b .* network.v .- network.u)
+
+    return network
 end
