@@ -1,5 +1,15 @@
 abstract type IzhNetwork end
 
+struct Reward{T<:AbstractFloat}
+    # i.e. "dopamine"
+
+    # amount of "reward" present in the system
+    reward::T
+
+    # constant decay parameter
+    decay::T
+end
+
 mutable struct BidirectionalConnection
     forward::Matrix{<:AbstractFloat}
     forward_mask::AbstractMatrix{Bool}
@@ -29,6 +39,11 @@ struct IzhParameters{T <: AbstractArray{<:AbstractFloat}}
         @assert length(a) == length(b) == length(c) == length(d)
         new(a, b, c, d)
     end
+end
+
+
+function step_reward(reward::Reward, reward_injection::AbstractFloat)
+    Reward(reward.reward - reward.reward/reward.decay + reward_injection, reward.decay)
 end
 
 

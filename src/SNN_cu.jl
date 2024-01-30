@@ -6,16 +6,6 @@ using("SNN_abs.jl")
 
 abstract type CudaIzhNetwork <: IzhNetwork end
 
-struct Reward{T<:AbstractFloat}
-    # i.e. "dopamine"
-
-    # amount of "reward" present in the system
-    reward::T
-
-    # constant decay parameter
-    decay::T
-end
-
 mutable struct CudaEligibilityTrace{T<:AbstractFloat}
     pre_trace::CuArray{T, 1}
     post_trace::CuArray{T, 1}
@@ -29,15 +19,11 @@ mutable struct CudaEligibilityTrace{T<:AbstractFloat}
 end
 
 
-function step_reward(reward::Reward, reward_injection::AbstractFloat)
-    Reward(reward.reward .- reward.reward ./ reward.decay .+ reward_injection, reward.decay)
-end
-
-
 function weight_update!(network::CudaIzhNetwork, trace::CudaEligibilityTrace, reward::Reward)
     network.S = network.S + reward.reward * trace.e_trace 
     return network
 end
+
 
 function step_trace!(trace::CudaEligibilityTrace, firings::CuArray{Bool, 1}, mask::CuArray{Bool, 2})
     trace.pre_trace .= trace.pre_trace .- trace.pre_trace ./ trace.pre_decay .+ firings .* trace.pre_increment

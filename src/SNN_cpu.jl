@@ -7,33 +7,6 @@ using("SNN_abs.jl")
 
 abstract type CpuIzhNetwork <: IzhNetwork end
 
-# AboAmmar quick elementwise row multiplication
-# Found here: https://stackoverflow.com/questions/48460875/vector-matrix-element-wise-multiplication-by-rows-in-julia-efficiently
-
-function pre_trace_copier(pre_trace::Vector{Float32}, firings::Vector{Bool})
-    side = length(pre_trace)
-    M = zeros(side, side)
-
-    @simd for i in 1:length(firings)
-        @inbounds if firings[i]
-            M[i, :] = pre_trace
-        end
-    end
-    M
-end
-
-function post_trace_copier(post_trace::Vector{Float32}, firings::Vector{Bool})
-    side = length(post_trace)
-    M = zeros(side, side)
-
-    @simd for j in 1:length(firings)
-        @inbounds if firings[j]
-            M[:, j] = post_trace
-        end
-    end
-    M
-end
-
 # Implement SSP?
 
 # reward functionality
@@ -49,32 +22,27 @@ end
 #    decay::AbstractFloat
 #end
 
-
-function step_reward(reward::Reward, reward_injection::AbstractFloat)
-    Reward(reward.reward - reward.reward/reward.decay + reward_injection, reward.decay)
-end
-
-mutable struct EligibilityTrace
+mutable struct EligibilityTrace{T<:AbstractFloat}
     # for speed the inhibitory-ness of junctions must be stored here within the constants
 
     # vectors to keep track of traces, typically initialized at 0
-    pre_trace::Vector{Float32}
-    post_trace::Vector{Float32}
-    e_trace::Matrix{Float32}
+    pre_trace::Vector{T}
+    post_trace::Vector{T}
+    e_trace::Matrix{T}
 
     # Parameters for pre/post incrementing and decay
     # 
-    const pre_increment::AbstractFloat
-    const post_increment::AbstractFloat
+    const pre_increment::T
+    const post_increment::T
 
     # Constant to multiply junction traces by when updating the eligibility trace
     # Should typically be negative for inhibitory junctions
-    const constants::Matrix{Float32}
+    const constants::Matrix{T}
 
     # Decay parameters
-    const pre_decay::AbstractFloat
-    const post_decay::AbstractFloat
-    const e_decay::AbstractFloat
+    const pre_decay::T
+    const post_decay::T
+    const e_decay::T
 end
 
 
@@ -133,7 +101,7 @@ function step_trace!(trace::EligibilityTrace, firings::Vector{Bool})
     trace.e_trace = trace.e_trace .- trace.e_trace/trace.e_decay
 end
 
-function step_trace!(trace::EligibilityTrace, firings::Vector{Bool}, mask::AbstractMatrix{Bool})
+function step_trace!(trace::EligibilityTrace, firings::Vector{Bool}, mask::Matrix{Bool})
 
     len_post = length(trace.post_trace)
     len_pre = length(trace.pre_trace)
@@ -187,70 +155,46 @@ function step_trace!(trace::EligibilityTrace, firings::Vector{Bool}, mask::Abstr
     trace.e_trace = trace.e_trace - trace.e_trace/trace.e_decay
 end
 
-
-function step_trace!(trace::EligibilityTrace, firings::Vector{Bool}, mask::SparseMatrixCSC{Bool, <:Integer})
-    # Sparse masking not currently recommended, but kept because it was written
-
-    trace.pre_trace = trace.pre_trace - trace.pre_trace/trace.pre_decay + firings * trace.pre_increment
-    trace.post_trace = trace.post_trace - trace.post_trace/trace.post_decay + firings * trace.post_increment
-
-    # restructured logic
-    #
-    # Pre-synaptic input (second index j, or column index j, of matrix)
-    #     |
-    #     v
-    # . . . . .
-    # . . . . . --> Post-synaptic output (first index i or row index i)
-    # . . . . .
-
-    #firings_s = firings
-    addable_pre_trace = pre_trace_copier(trace.pre_trace, firings) #trace.pre_trace * firings_s'
-    addable_post_trace = post_trace_copier(trace.post_trace, firings) #firings_s * trace.post_trace'
-    e_trace_delta = (addable_post_trace+addable_pre_trace) .* trace.constants 
-    trace.e_trace = trace.e_trace + e_trace_delta .* mask - trace.e_trace/trace.e_decay
-
-end
-
 function weight_update(trace::EligibilityTrace, reward::Reward)
     return reward.reward * trace.e_trace 
 end
 
 # network structures, see Izhikevich simple model and STDP papers
 
-mutable struct CpuUnmaskedIzhNetwork <: CpuIzhNetwork
+mutable struct CpuUnmaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
     
     # number of neurons
     const N::Integer
 
     # time scale recovery parameter
-    const a::Vector{Float32}
+    const a::Vector{T}
 
     # sensitivty to sub-threshold membrane fluctuations (greater values couple v and u)
-    const b::Vector{Float32}
+    const b::Vector{T}
 
     # post-spike reset value of membrane potential v
-    const c::Vector{Float32}
+    const c::Vector{T}
 
     # post-spike reset of recovery variable u
-    const d::Vector{Float32}
+    const d::Vector{T}
 
     # membrane potential and recovery variable, used in Izhikevich system of equations
-    v::Vector{Float32}
-    u::Vector{Float32}
+    v::Vector{T}
+    u::Vector{T}
 
     # synaptic weights
-    S::Matrix{Float32}
+    S::Matrix{T}
 
     # bounds used for clamping, UB should generally be 0 for inhibitory networks
     # LB should be 0 for excitatory networks
-    S_ub::Matrix{Float32}
-    S_lb::Matrix{Float32}
+    S_ub::Matrix{T}
+    S_lb::Matrix{T}
 
 
     # boolean of is-fired
     fired::Vector{Bool}
 
-    function CpuUnmaskedIzhNetwork(N::Integer, a::Vector{Float32}, b::Vector{Float32}, c::Vector{Float32}, d::Vector{Float32}, v::Vector{Float32}, u::Vector{Float32}, S::Matrix{Float32}, S_ub::Matrix{Float32}, S_lb::Matrix{Float32}, fired::AbstractVector{Bool})
+    function CpuUnmaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, fired::AbstractVector{Bool})
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N
@@ -262,43 +206,43 @@ mutable struct CpuUnmaskedIzhNetwork <: CpuIzhNetwork
         @assert size(S_ub) == (N, N)
         @assert length(fired) == N
 
-        return new(N, a, b, c, d, v, u, S, S_ub, S_lb, fired)
+        return new{T}(N, a, b, c, d, v, u, S, S_ub, S_lb, fired)
     end
 end
 
 
-mutable struct CpuMaskedIzhNetwork <: CpuIzhNetwork
+mutable struct CpuMaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
     
     # number of neurons
     const N::Integer
     # time scale recovery parameter
-    const a::Vector{Float32}
+    const a::Vector{T}
     # sensitivty to sub-threshold membrane fluctuations (greater values couple v and u)
-    const b::Vector{Float32}
+    const b::Vector{T}
     # post-spike reset value of membrane potential v
-    const c::Vector{Float32}
+    const c::Vector{T}
     # post-spike reset of recovery variable u
-    const d::Vector{Float32}
+    const d::Vector{T}
 
     # membrane poential and recovery variable, used in Izhikevich system of equations
-    v::Vector{Float32}
-    u::Vector{Float32}
+    v::Vector{T}
+    u::Vector{T}
 
     # synaptic weights
-    S::Union{Matrix{Float32}, SparseMatrixCSC{Float32, <:Integer}}
+    S::Matrix{T}
 
     # bounds used for clamping, UB should generally be 0 for inhibitory networks
     # LB should be 0 for excitatory networks
-    S_ub::Matrix{Float32}
-    S_lb::Matrix{Float32}
+    S_ub::Matrix{T}
+    S_lb::Matrix{T}
 
     # mask
-    mask::Union{AbstractMatrix{Bool}, SparseMatrixCSC{Bool, <:Integer}}
+    mask::Matrix{Bool}
 
     # boolean of is-fired
     fired::Vector{Bool}
 
-    function CpuMaskedIzhNetwork(N::Integer, a::Vector{Float32}, b::Vector{Float32}, c::Vector{Float32}, d::Vector{Float32}, v::Vector{Float32}, u::Vector{Float32}, S::Union{Matrix{Float32}, SparseMatrixCSC{Float32, <:Integer}}, S_ub::Matrix{Float32}, S_lb::Matrix{Float32}, mask::Union{AbstractMatrix{Bool}, SparseMatrixCSC{Bool, <:Integer}}, fired::AbstractVector{Bool})
+    function CpuMaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, mask::Matrix{Bool}, fired::Vector{Bool})
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N
@@ -309,14 +253,14 @@ mutable struct CpuMaskedIzhNetwork <: CpuIzhNetwork
         @assert size(mask) == (N, N)
         @assert length(fired) == N
 
-        return new(N, a, b, c, d, v, u, S, S_ub, S_lb, mask, fired)
+        return new{T}(N, a, b, c, d, v, u, S, S_ub, S_lb, mask, fired)
     end
 
 
 end
 
 
-function step_network!(in_voltage::Vector{Float32}, network::CpuIzhNetwork)
+function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuIzhNetwork)
     network.fired = network.v .>= 30
 
     # reset voltages to c parameter values
