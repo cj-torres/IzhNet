@@ -2,8 +2,8 @@ using CUDA
 using Plots
 using Random
 
-include("SNN_abs.jl")
-using .IzhUtils
+#include("SNN_abs.jl")
+#using .IzhUtils
 
 abstract type CudaIzhNetwork <: IzhNetwork end
 
@@ -17,47 +17,6 @@ mutable struct CudaEligibilityTrace{T<:AbstractFloat}
     const pre_decay::T
     const post_decay::T
     const e_decay::T
-end
-
-
-function weight_update!(network::CudaIzhNetwork, trace::CudaEligibilityTrace, reward::Reward)
-    network.S = network.S + reward.reward * trace.e_trace 
-    return network
-end
-
-
-function step_trace!(trace::CudaEligibilityTrace, firings::CuArray{Bool, 1}, mask::CuArray{Bool, 2})
-    trace.pre_trace .= trace.pre_trace .- trace.pre_trace ./ trace.pre_decay .+ firings .* trace.pre_increment
-    trace.post_trace .= trace.post_trace .- trace.post_trace ./ trace.post_decay .+ firings .* trace.post_increment
-
-    # Vectorized update for e_trace
-    # Broadcasting the firings array to match the dimensions of e_trace
-    firings_row = reshape(firings, 1, :)
-    firings_col = reshape(firings, :, 1)
-
-    trace.e_trace .= trace.e_trace .+ ((trace.constants .* trace.pre_trace') .* mask) .* firings_col
-    trace.e_trace .= trace.e_trace .+ ((trace.constants .* trace.post_trace) .* mask) .* firings_row
-
-    trace.e_trace .= trace.e_trace .- trace.e_trace ./ trace.e_decay
-end
-
-
-function step_trace!(trace::CudaEligibilityTrace, firings::CuArray{Bool, 1})
-    trace.pre_trace .= trace.pre_trace .- trace.pre_trace ./ trace.pre_decay .+ firings .* trace.pre_increment
-    trace.post_trace .= trace.post_trace .- trace.post_trace ./ trace.post_decay .+ firings .* trace.post_increment
-
-    # GPU-compatible way to update e_trace
-    # You may need to adjust this logic based on the specifics of your model
-    for i in 1:length(firings)
-        if firings[i]
-            trace.e_trace[i, :] .= trace.e_trace[i, :] .+ trace.constants[i, :] .* trace.pre_trace
-            trace.e_trace[:, i] .= trace.e_trace[:, i] .+ trace.constants[:, i] .* trace.post_trace
-        end
-    end
-
-    trace.e_trace .= trace.e_trace .- trace.e_trace ./ trace.e_decay
-
-    return trace
 end
 
 
@@ -201,5 +160,44 @@ function step_network!(in_voltage::CuArray{<:AbstractFloat, 1}, network::CudaMas
     # update recovery parameter u
     network.u .= network.u .+ network.a .* (network.b .* network.v .- network.u)
 
+    return network
+end
+
+function step_trace!(trace::CudaEligibilityTrace, network::CudaMaskedIzhNetwork)
+    trace.pre_trace .= trace.pre_trace .- trace.pre_trace ./ trace.pre_decay .+ network.fired .* trace.pre_increment
+    trace.post_trace .= trace.post_trace .- trace.post_trace ./ trace.post_decay .+ network.fired .* trace.post_increment
+
+    # Vectorized update for e_trace
+    # Broadcasting the firings array to match the dimensions of e_trace
+    firings_row = reshape(network.fired, 1, :)
+    firings_col = reshape(network.fired, :, 1)
+
+    trace.e_trace .= trace.e_trace .+ ((trace.constants .* trace.pre_trace') .* network.mask) .* firings_col
+    trace.e_trace .= trace.e_trace .+ ((trace.constants .* trace.post_trace) .* network.mask) .* firings_row
+
+    trace.e_trace .= trace.e_trace .- trace.e_trace ./ trace.e_decay
+end
+
+
+function step_trace!(trace::CudaEligibilityTrace, network::CudaUnmaskedIzhNetwork)
+    trace.pre_trace .= trace.pre_trace .- trace.pre_trace ./ trace.pre_decay .+ network.fired .* trace.pre_increment
+    trace.post_trace .= trace.post_trace .- trace.post_trace ./ trace.post_decay .+ network.fired .* trace.post_increment
+
+    # GPU-compatible way to update e_trace
+    # You may need to adjust this logic based on the specifics of your model
+    for i in eachindex(network.fired)
+        if network.fired[i]
+            trace.e_trace[i, :] .= trace.e_trace[i, :] .+ trace.constants[i, :] .* trace.pre_trace
+            trace.e_trace[:, i] .= trace.e_trace[:, i] .+ trace.constants[:, i] .* trace.post_trace
+        end
+    end
+
+    trace.e_trace .= trace.e_trace .- trace.e_trace ./ trace.e_decay
+
+    return trace
+end
+
+function weight_update!(network::CudaIzhNetwork, trace::CudaEligibilityTrace, reward::Reward)
+    network.S = network.S + reward.reward * trace.e_trace 
     return network
 end

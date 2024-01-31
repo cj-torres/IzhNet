@@ -1,8 +1,8 @@
 using Plots
 using Random
 
-include("SNN_abs.jl")
-using .IzhUtils
+#include("SNN_abs.jl")
+#using .IzhUtils
 
 abstract type CpuIzhNetwork <: IzhNetwork end
 
@@ -21,7 +21,7 @@ abstract type CpuIzhNetwork <: IzhNetwork end
 #    decay::AbstractFloat
 #end
 
-mutable struct EligibilityTrace{T<:AbstractFloat}
+mutable struct CpuEligibilityTrace{T<:AbstractFloat}
     # for speed the inhibitory-ness of junctions must be stored here within the constants
 
     # vectors to keep track of traces, typically initialized at 0
@@ -45,118 +45,7 @@ mutable struct EligibilityTrace{T<:AbstractFloat}
 end
 
 
-function step_trace!(trace::EligibilityTrace, firings::Vector{Bool})
-    len_pre = length(trace.pre_trace)
-    len_post = length(trace.post_trace)
 
-    trace.pre_trace = trace.pre_trace - trace.pre_trace/trace.pre_decay + firings * trace.pre_increment
-    trace.post_trace = trace.post_trace - trace.post_trace/trace.post_decay + firings * trace.post_increment
-
-
-    # restructured logic
-    len_post = length(trace.post_trace)
-    len_pre = length(trace.pre_trace)
-
-    trace.pre_trace = trace.pre_trace - trace.pre_trace/trace.pre_decay + firings * trace.pre_increment
-    trace.post_trace = trace.post_trace - trace.post_trace/trace.post_decay + firings * trace.post_increment
-
-    @inbounds for i in 1:len_post
-        @inbounds @simd for j in 1:len_pre
-
-
-            # i is row index, j is column index, so...
-            #
-            #
-            # Pre-synaptic input (indexed with j)
-            #     |
-            #     v
-            # . . . . .
-            # . . . . . --> Post-synaptic output (indexed with i)
-            # . . . . .
-            
-            # Check if presynaptic neuron is inhibitory
-
-            # We add the *opposite* trace given a neural spike
-            # So if post-synaptic neuron i spikes, we add the trace for the 
-            # pre-synaptic neuron to the eligibility trace
-
-            if firings[i]
-                trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.pre_trace[j]
-            end
-
-            # And if pre-synaptic neuron j spikes, we add the trace for the 
-            # post-synaptic neuron to the eligibility trace
-
-            if firings[j]
-                trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.post_trace[i]
-            end
-
-            # each trace will decay according to the decay parameter
-            
-
-        end
-    end
-
-    trace.e_trace = trace.e_trace .- trace.e_trace/trace.e_decay
-end
-
-function step_trace!(trace::EligibilityTrace, firings::Vector{Bool}, mask::Matrix{Bool})
-
-    len_post = length(trace.post_trace)
-    len_pre = length(trace.pre_trace)
-
-    trace.pre_trace = trace.pre_trace - trace.pre_trace/trace.pre_decay + firings * trace.pre_increment
-    trace.post_trace = trace.post_trace - trace.post_trace/trace.post_decay + firings * trace.post_increment
-
-    @inbounds for i in 1:len_post
-        @inbounds @simd for j in 1:len_pre
-
-
-            # i is row index, j is column index, so...
-            #
-            #
-            # Pre-synaptic input (indexed with j)
-            #     |
-            #     v
-            # . . . . .
-            # . . . . . --> Post-synaptic output (indexed with i)
-            # . . . . .
-            
-            # Check if presynaptic neuron is inhibitory
-
-            # Check if the neurons have a synpatic connection j -> i
-            # remember wonky row/column indexing makes things "backwards"
-            if mask[i,j]
-
-                # We add the *opposite* trace given a neural spike
-                # So if post-synaptic neuron i spikes, we add the trace for the 
-                # pre-synaptic neuron to the eligibility trace
-
-                if firings[i]
-                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.pre_trace[j]
-                end
-
-                # And if pre-synaptic neuron j spikes, we add the trace for the 
-                # post-synaptic neuron to the eligibility trace
-
-                if firings[j]
-                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.post_trace[i]
-                end
-
-                # each trace will decay according to the decay parameter
-                
-            end
-
-        end
-    end
-
-    # each trace will decay according to the decay parameter
-    trace.e_trace = trace.e_trace - trace.e_trace/trace.e_decay
-end
-
-function weight_update(trace::EligibilityTrace, reward::Reward)
-    return reward.reward * trace.e_trace 
-end
 
 # network structures, see Izhikevich simple model and STDP papers
 
@@ -281,6 +170,114 @@ function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuIzhNetwo
 
 end
 
+
+function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedIzhNetwork)
+
+    # restructured logic
+    len_post = length(trace.post_trace)
+    len_pre = length(trace.pre_trace)
+
+    trace.pre_trace = trace.pre_trace - trace.pre_trace/trace.pre_decay + network.fired * trace.pre_increment
+    trace.post_trace = trace.post_trace - trace.post_trace/trace.post_decay + network.fired * trace.post_increment
+
+    @inbounds for i in 1:len_post
+        @inbounds @simd for j in 1:len_pre
+
+
+            # i is row index, j is column index, so...
+            #
+            #
+            # Pre-synaptic input (indexed with j)
+            #     |
+            #     v
+            # . . . . .
+            # . . . . . --> Post-synaptic output (indexed with i)
+            # . . . . .
+            
+            # Check if presynaptic neuron is inhibitory
+
+            # We add the *opposite* trace given a neural spike
+            # So if post-synaptic neuron i spikes, we add the trace for the 
+            # pre-synaptic neuron to the eligibility trace
+
+            if network.fired[i]
+                trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.pre_trace[j]
+            end
+
+            # And if pre-synaptic neuron j spikes, we add the trace for the 
+            # post-synaptic neuron to the eligibility trace
+
+            if network.fired[j]
+                trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.post_trace[i]
+            end
+
+            # each trace will decay according to the decay parameter
+            
+
+        end
+    end
+
+    trace.e_trace = trace.e_trace .- trace.e_trace/trace.e_decay
+end
+
+function step_trace!(trace::CpuEligibilityTrace, network::CpuMaskedIzhNetwork)
+
+    len_post = length(trace.post_trace)
+    len_pre = length(trace.pre_trace)
+
+    trace.pre_trace = trace.pre_trace - trace.pre_trace/trace.pre_decay + network.fired * trace.pre_increment
+    trace.post_trace = trace.post_trace - trace.post_trace/trace.post_decay + network.fired * trace.post_increment
+
+    @inbounds for i in 1:len_post
+        @inbounds @simd for j in 1:len_pre
+
+
+            # i is row index, j is column index, so...
+            #
+            #
+            # Pre-synaptic input (indexed with j)
+            #     |
+            #     v
+            # . . . . .
+            # . . . . . --> Post-synaptic output (indexed with i)
+            # . . . . .
+            
+            # Check if presynaptic neuron is inhibitory
+
+            # Check if the neurons have a synpatic connection j -> i
+            # remember wonky row/column indexing makes things "backwards"
+            if mask[i,j]
+
+                # We add the *opposite* trace given a neural spike
+                # So if post-synaptic neuron i spikes, we add the trace for the 
+                # pre-synaptic neuron to the eligibility trace
+
+                if network.fired[i]
+                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.pre_trace[j]
+                end
+
+                # And if pre-synaptic neuron j spikes, we add the trace for the 
+                # post-synaptic neuron to the eligibility trace
+
+                if network.fired[j]
+                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.post_trace[i]
+                end
+
+                # each trace will decay according to the decay parameter
+                
+            end
+
+        end
+    end
+
+    # each trace will decay according to the decay parameter
+    trace.e_trace = trace.e_trace - trace.e_trace/trace.e_decay
+end
+
+function weight_update!(network::CpuIzhNetwork, trace::CpuEligibilityTrace, reward::Reward)
+    network.S = network.S + reward.reward * trace.e_trace 
+    return network
+end
 
 #function step_network!(in_voltage::Vector{Float32}, network::CpuMaskedIzhNetwork)
 #    network.fired = network.v .>= 30
