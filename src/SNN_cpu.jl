@@ -1,9 +1,7 @@
 using Plots
-using SparseArrays
-using Profile
 using Random
 
-using("SNN_abs.jl")
+include("SNN_abs.jl")
 
 abstract type CpuIzhNetwork <: IzhNetwork end
 
@@ -194,7 +192,7 @@ mutable struct CpuUnmaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
     # boolean of is-fired
     fired::Vector{Bool}
 
-    function CpuUnmaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, fired::AbstractVector{Bool})
+    function CpuUnmaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, fired::AbstractVector{Bool}) where T <: AbstractFloat
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N
@@ -242,7 +240,7 @@ mutable struct CpuMaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
     # boolean of is-fired
     fired::Vector{Bool}
 
-    function CpuMaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, mask::Matrix{Bool}, fired::Vector{Bool})
+    function CpuMaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, mask::Matrix{Bool}, fired::Vector{Bool}) where T <: AbstractFloat
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N

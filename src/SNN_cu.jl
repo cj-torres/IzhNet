@@ -2,7 +2,7 @@ using CUDA
 using Plots
 using Random
 
-using("SNN_abs.jl")
+include("SNN_abs.jl")
 
 abstract type CudaIzhNetwork <: IzhNetwork end
 
@@ -98,7 +98,7 @@ mutable struct CudaUnmaskedIzhNetwork{T<:AbstractFloat} <: CudaIzhNetwork
                                 S::CuArray{T, 2}, 
                                 S_ub::CuArray{T, 2}, 
                                 S_lb::CuArray{T, 2}, 
-                                fired::CuArray{Bool, 1})
+                                fired::CuArray{Bool, 1}) where T <: AbstractFloat
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N
@@ -140,7 +140,7 @@ mutable struct CudaMaskedIzhNetwork{T<:AbstractFloat} <: CudaIzhNetwork
                                 S_ub::CuArray{T, 2}, 
                                 S_lb::CuArray{T, 2}, 
                                 mask::CuArray{Bool, 2}, 
-                                fired::CuArray{Bool, 1})
+                                fired::CuArray{Bool, 1}) where T <: AbstractFloat
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N

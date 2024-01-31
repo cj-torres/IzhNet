@@ -25,7 +25,7 @@ mutable struct IzhSuperNetwork <: IzhNetwork
 end
 
 
-struct IzhParameters{T <: AbstractArray{<:AbstractFloat}}
+struct IzhParameters{T<:AbstractArray{<:AbstractFloat}}
     # time scale recovery parameter
     a::T
     # sensitivty to sub-threshold membrane fluctuations (greater values couple v and u)
@@ -35,9 +35,9 @@ struct IzhParameters{T <: AbstractArray{<:AbstractFloat}}
     # post-spike reset of recovery variable u
     d::T
 
-    function IzhParameters(a::T, b::T, c::T, d::T)
+    function IzhParameters(a::T, b::T, c::T, d::T) where T <: AbstractArray{<:AbstractFloat}
         @assert length(a) == length(b) == length(c) == length(d)
-        new(a, b, c, d)
+        new{T}(a, b, c, d)
     end
 end
 
