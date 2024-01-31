@@ -2,6 +2,7 @@ using Plots
 using Random
 
 include("SNN_abs.jl")
+using .IzhUtils
 
 abstract type CpuIzhNetwork <: IzhNetwork end
 

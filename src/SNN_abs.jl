@@ -1,3 +1,5 @@
+module IzhUtils
+
 abstract type IzhNetwork end
 
 struct Reward{T<:AbstractFloat}
@@ -67,4 +69,6 @@ end
 
 function StandardResonantParams()
     
+end
+
 end

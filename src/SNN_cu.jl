@@ -3,6 +3,7 @@ using Plots
 using Random
 
 include("SNN_abs.jl")
+using .IzhUtils
 
 abstract type CudaIzhNetwork <: IzhNetwork end
 
