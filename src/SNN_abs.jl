@@ -48,6 +48,10 @@ function step_reward(reward::Reward, reward_injection::AbstractFloat)
     Reward(reward.reward - reward.reward/reward.decay + reward_injection, reward.decay)
 end
 
+function reset_reward(reward::Reward)
+    Reward(reward.reward*0, reward.decay)
+end
+
 
 # Functions for returning parameters based on presets
 

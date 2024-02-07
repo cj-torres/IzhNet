@@ -275,8 +275,19 @@ function step_trace!(trace::CpuEligibilityTrace, network::CpuMaskedIzhNetwork)
 end
 
 function weight_update!(network::CpuIzhNetwork, trace::CpuEligibilityTrace, reward::Reward)
-    network.S = network.S + reward.reward * trace.e_trace 
+    network.S = min.(max.(network.S + reward.reward * trace.e_trace, network.S_lb), network.S_ub)
     return network
+end
+
+function reset_network!(network::CpuIzhNetwork)
+    network.v = network.v .* 0 .- 65.0
+    network.u = network.b .* network.v
+end
+
+function reset_trace!(trace::CpuEligibilityTrace)
+    trace.pre_trace = trace.pre_trace * 0
+    trace.post_trace = trace.post_trace * 0
+    trace.e_trace = trace.e_trace * 0
 end
 
 #function step_network!(in_voltage::Vector{Float32}, network::CpuMaskedIzhNetwork)

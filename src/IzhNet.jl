@@ -1,7 +1,7 @@
 module IzhNet
 
 export CudaMaskedIzhNetwork, CudaUnmaskedIzhNetwork, CudaEligibilityTrace, CpuEligibilityTrace, CpuMaskedIzhNetwork, CpuUnmaskedIzhNetwork, Reward
-export step_network!, step_trace!, step_reward, weight_update!
+export step_network!, step_trace!, step_reward, weight_update!, reset_network!, reset_trace!, reset_reward
 
 include("SNN_abs.jl")
 #using .IzhUtils
