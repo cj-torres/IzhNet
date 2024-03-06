@@ -45,7 +45,7 @@ end
 
 
 function step_reward(reward::Reward, reward_injection::AbstractFloat)
-    Reward(reward.reward - reward.reward/reward.decay + reward_injection, reward.decay)
+    Reward(reward.reward - (reward.reward/reward.decay) + reward_injection, reward.decay)
 end
 
 function reset_reward(reward::Reward)
