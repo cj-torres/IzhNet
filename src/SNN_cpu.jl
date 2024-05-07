@@ -1,8 +1,18 @@
 using Plots
 using Random
 
-#include("SNN_abs.jl")
-#using .IzhUtils
+include("SNN_abs.jl")
+# using .IzhUtils
+
+# tau: AMPA, NMDA, GABA_A, BABA_B (ms)
+const TAU_A::Float16 = 5.0
+const TAU_B::Float16 = 150.0
+const TAU_C::Float16 = 6.0
+const TAU_D::Float16 = 150.0
+
+# constant in substitution of depression & facilitation variables
+# (for conductances g)
+const ZETA::Float16 = 0.1
 
 abstract type CpuIzhNetwork <: IzhNetwork end
 
@@ -45,8 +55,6 @@ mutable struct CpuEligibilityTrace{T<:AbstractFloat}
 end
 
 
-
-
 # network structures, see Izhikevich simple model and STDP papers
 
 mutable struct CpuUnmaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
@@ -82,7 +90,27 @@ mutable struct CpuUnmaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
     # boolean of is-fired
     fired::Vector{Bool}
 
-    function CpuUnmaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, fired::AbstractVector{Bool}) where T <: AbstractFloat
+    # conductances for receptors
+    g_a::Float32 # TODO: determine orders of magnitude (then swap to 64 if necessary)
+    g_b::Float32
+    g_c::Float32
+    g_d::Float32
+
+    function CpuUnmaskedIzhNetwork(N::Integer, 
+                                a::Vector{T}, 
+                                b::Vector{T}, 
+                                c::Vector{T}, 
+                                d::Vector{T}, 
+                                v::Vector{T}, 
+                                u::Vector{T}, 
+                                S::Matrix{T}, 
+                                S_ub::Matrix{T}, 
+                                S_lb::Matrix{T}, 
+                                fired::AbstractVector{Bool},
+                                g_a::Float32,
+                                g_b::Float32,
+                                g_c::Float32,
+                                g_d::Float32) where T <: AbstractFloat
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N
@@ -94,7 +122,7 @@ mutable struct CpuUnmaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
         @assert size(S_ub) == (N, N)
         @assert length(fired) == N
 
-        return new{T}(N, a, b, c, d, v, u, S, S_ub, S_lb, fired)
+        return new{T}(N, a, b, c, d, v, u, S, S_ub, S_lb, fired, g_a, g_b, g_c, g_d) 
     end
 end
 
@@ -130,7 +158,18 @@ mutable struct CpuMaskedIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
     # boolean of is-fired
     fired::Vector{Bool}
 
-    function CpuMaskedIzhNetwork(N::Integer, a::Vector{T}, b::Vector{T}, c::Vector{T}, d::Vector{T}, v::Vector{T}, u::Vector{T}, S::Matrix{T}, S_ub::Matrix{T}, S_lb::Matrix{T}, mask::Matrix{Bool}, fired::Vector{Bool}) where T <: AbstractFloat
+    function CpuMaskedIzhNetwork(N::Integer, 
+                                a::Vector{T}, 
+                                b::Vector{T}, 
+                                c::Vector{T}, 
+                                d::Vector{T}, 
+                                v::Vector{T}, 
+                                u::Vector{T}, 
+                                S::Matrix{T}, 
+                                S_ub::Matrix{T},
+                                S_lb::Matrix{T}, 
+                                mask::Matrix{Bool}, 
+                                fired::Vector{Bool}) where T <: AbstractFloat
         @assert length(a) == N
         @assert length(b) == N
         @assert length(c) == N
@@ -160,16 +199,47 @@ function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuIzhNetwo
     # calculate new input voltages given presently firing neurons
     in_voltage = in_voltage + (network.S * network.fired)
 
+    # Calculate total synaptic currents
+    I_syn::Vector{T} = calc_synaptic_current(network)
+
     # update voltages (twice for stability)
-    network.v = network.v + 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage)
-    network.v = network.v + 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage)
+    network.v = network.v + 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage - I_syn)
+    network.v = network.v + 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage - I_syn)
     network.v = min.(network.v, 30)
 
     # update recovery parameter u
     network.u = network.u + network.a .* (network.b .* network.v - network.u)
-
+    
+    return network
 end
 
+function calc_synaptic_current(network::CpuIzhNetwork)
+    # Calculate the total synaptic current (I_syn) of the ith neuron
+    I_syn::Vector{T} = network.g_a * (network.v .- 0)
+                    .+ network.g_b * (((network.v .+ 80) / .60) .^ 2) / (1 .+ ((network.v .+ 80) / 60) .^2) * (network.v .- 0)
+                    .+ network.g_c * (network.v .+ 70)
+                    .+ network.g_d * (network.v .+ 90)
+    return I_syn
+end
+
+function update_g_a!(network::CpuIzhNetwork)
+    network.g_a += -(network.g_a / TAU_A) + network.S * network.fired' * ZETA
+end
+
+function update_g_b!(network::CpuIzhNetwork)
+    # Similar to update_g_a()
+    network.g_b += -(network.g_b / TAU_B) + network.S * network.fired' * ZETA
+end
+
+function update_g_c!(network::CpuIzhNetwork)
+    # TODO: Consider initializing "ones(N, N)" in struct -- when confirmed correct functionality 
+    network.g_c += -(network.g_c / TAU_C) + ones(network.N, network.N) * network.fired' * ZETA
+end
+
+function update_g_d!(network::CpuIzhNetwork)
+    # Similar to update_g_c()
+    network.g_d += -(network.g_d / TAU_D) + ones(network.N, network.N) * network.fired' * ZETA
+end
 
 function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedIzhNetwork)
 
