@@ -7,7 +7,7 @@ const ZETA::Float16 = 0.1
 
 abstract type CpuConductanceIzhNetwork <: IzhNetwork end
 
-mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuIzhNetwork
+mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanceIzhNetwork
         
     # number of neurons
     const N::Integer
@@ -90,10 +90,10 @@ function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuConducta
     network.u[network.fired] .= network.u[network.fired] + network.d[network.fired]
 
     # calculate new input voltages given presently firing neurons
-    in_voltage = in_voltage + (network.S * network.fired)
+    # in_voltage = in_voltage + (network.S * network.fired)
 
     # Calculate total synaptic currents
-    I_syn::Vector{T} = calc_synaptic_current(network)
+    I_syn = calc_synaptic_current(network)
 
     # update voltages (twice for stability)
     network.v = network.v + 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage - I_syn)
@@ -102,6 +102,11 @@ function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuConducta
 
     # update recovery parameter u
     network.u = network.u + network.a .* (network.b .* network.v - network.u)
+
+    update_g_a!(network)
+    update_g_b!(network)
+    update_g_c!(network)
+    update_g_d!(network)
     
     return network
 end
@@ -109,30 +114,31 @@ end
 
 function calc_synaptic_current(network::CpuConductanceIzhNetwork)
     # Calculate the total synaptic current (I_syn) of the ith neuron
-    I_syn::Vector{T} = network.g_a .* (network.v .- 0)
+    I_syn = network.g_a .* (network.v .- 0)
                     .+ network.g_b .* (((network.v .+ 80) / 60) .^ 2) / (1 .+ ((network.v .+ 80) / 60) .^2) .* (network.v .- 0)
                     .+ network.g_c .* (network.v .+ 70)
                     .+ network.g_d .* (network.v .+ 90)
     return I_syn
 end
 
-function update_g_a!(network::CpuIzhNetwork)
-    network.g_a += -(network.g_a / TAU_A) + network.S * network.fired' * ZETA
+function update_g_a!(network::CpuConductanceIzhNetwork)
+    print("g updated")
+    network.g_a += -(network.g_a / TAU_A) + network.S * network.fired * ZETA
 end
 
-function update_g_b!(network::CpuIzhNetwork)
+function update_g_b!(network::CpuConductanceIzhNetwork)
     # Similar to update_g_a()
-    network.g_b += -(network.g_b / TAU_B) + network.S * network.fired' * ZETA
+    network.g_b += -(network.g_b / TAU_B) + network.S * network.fired * ZETA
 end
 
-function update_g_c!(network::CpuIzhNetwork)
+function update_g_c!(network::CpuConductanceIzhNetwork)
     # TODO: Consider initializing "ones(N, N)" in struct -- when confirmed correct functionality 
-    network.g_c += -(network.g_c / TAU_C) + ones(network.N, network.N) * network.fired' * ZETA
+    network.g_c += -(network.g_c / TAU_C) + ones(network.N, network.N) * network.fired * ZETA
 end
 
-function update_g_d!(network::CpuIzhNetwork)
+function update_g_d!(network::CpuConductanceIzhNetwork)
     # Similar to update_g_c()
-    network.g_d += -(network.g_d / TAU_D) + ones(network.N, network.N) * network.fired' * ZETA
+    network.g_d += -(network.g_d / TAU_D) + ones(network.N, network.N) * network.fired * ZETA
 end
 
 function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedConductanceIzhNetwork)
