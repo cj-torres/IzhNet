@@ -4,16 +4,6 @@ using Random
 #include("SNN_abs.jl")
 # using .IzhUtils
 
-# tau: AMPA, NMDA, GABA_A, BABA_B (ms)
-const TAU_A::Float16 = 5.0
-const TAU_B::Float16 = 150.0
-const TAU_C::Float16 = 6.0
-const TAU_D::Float16 = 150.0
-
-# constant in substitution of depression & facilitation variables
-# (for conductances g)
-const ZETA::Float16 = 0.1
-
 abstract type CpuIzhNetwork <: IzhNetwork end
 
 # Implement SSP?

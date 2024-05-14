@@ -1,8 +1,11 @@
+# tau: AMPA, NMDA, GABA_A, BABA_B (ms)
 const TAU_A::Float16 = 5.0
 const TAU_B::Float16 = 150.0
 const TAU_C::Float16 = 6.0
 const TAU_D::Float16 = 150.0
 
+# constant in substitution of depression & facilitation variables
+# (for conductances g)
 const ZETA::Float16 = 0.1
 
 abstract type CpuConductanceIzhNetwork <: IzhNetwork end
@@ -12,17 +15,8 @@ mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConducta
     # number of neurons
     const N::Integer
 
-    # time scale recovery parameter
-    const a::Vector{T}
-
-    # sensitivty to sub-threshold membrane fluctuations (greater values couple v and u)
-    const b::Vector{T}
-
-    # post-spike reset value of membrane potential v
-    const c::Vector{T}
-
-    # post-spike reset of recovery variable u
-    const d::Vector{T}
+    # params: a, b, c, d
+    params::IzhParameters{Vector{T}}
 
     # membrane potential and recovery variable, used in Izhikevich system of equations
     v::Vector{T}
@@ -41,16 +35,17 @@ mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConducta
     fired::Vector{Bool}
 
     # conductances for receptors
-    g_a::Vector{T} # TODO: determine orders of magnitude (then swap to 64 if necessary)
+    g_a::Vector{T}
     g_b::Vector{T}
     g_c::Vector{T}
     g_d::Vector{T}
 
+    # for g updates
+    ones_matrix::Matrix{T}
+
+
     function CpuUnmaskedConductanceIzhNetwork(N::Integer, 
-                                a::Vector{T}, 
-                                b::Vector{T}, 
-                                c::Vector{T}, 
-                                d::Vector{T}, 
+                                params::IzhParameters{Vector{T}},
                                 v::Vector{T}, 
                                 u::Vector{T}, 
                                 S::Matrix{T}, 
@@ -61,33 +56,26 @@ mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConducta
                                 g_b::Vector{T},
                                 g_c::Vector{T},
                                 g_d::Vector{T}) where T <: AbstractFloat
-        @assert length(a) == N
-        @assert length(b) == N
-        @assert length(c) == N
-        @assert length(d) == N
-        @assert length(v) == N
-        @assert length(u) == N
+        @assert length(params.a) == N
+        @assert length(v) == length(u) == N
         @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
-        @assert size(S) == (N, N)
-        @assert size(S_lb) == (N, N)
-        @assert size(S_ub) == (N, N)
+        @assert size(S) == size(S_lb) == size(S_ub) == (N, N)
         @assert length(fired) == N
 
-        return new{T}(N, a, b, c, d, v, u, S, S_ub, S_lb, fired, g_a, g_b, g_c, g_d) 
+        ones_matrix = ones(T, N, N)
+        return new{T}(N, params, v, u, S, S_ub, S_lb, fired, g_a, g_b, g_c, g_d, ones_matrix) 
     end
 end
-
-
-
 
 function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuConductanceIzhNetwork)
     network.fired = network.v .>= 30
 
     # reset voltages to c parameter values
-    network.v[network.fired] .= network.c[network.fired]
+    network.v[network.fired] .= network.params.c[network.fired]
 
     # update recovery parameter u
-    network.u[network.fired] .= network.u[network.fired] + network.d[network.fired]
+    network.u[network.fired] .= network.u[network.fired] + network.params.d[network.fired]
+    # TODO: network.u[network.fired] .+= network.d[network.fired]
 
     # calculate new input voltages given presently firing neurons
     # in_voltage = in_voltage + (network.S * network.fired)
@@ -96,12 +84,12 @@ function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuConducta
     I_syn = calc_synaptic_current(network)
 
     # update voltages (twice for stability)
-    network.v = network.v + 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage - I_syn)
-    network.v = network.v + 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage - I_syn)
+    network.v += 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage - I_syn)
+    network.v += 0.5*(0.04*(network.v .^ 2) + 5*network.v .+ 140 - network.u + in_voltage - I_syn)
     network.v = min.(network.v, 30)
 
     # update recovery parameter u
-    network.u = network.u + network.a .* (network.b .* network.v - network.u)
+    network.u += network.params.a .* (network.params.b .* network.v - network.u)
 
     update_g_a!(network)
     update_g_b!(network)
@@ -122,7 +110,7 @@ function calc_synaptic_current(network::CpuConductanceIzhNetwork)
 end
 
 function update_g_a!(network::CpuConductanceIzhNetwork)
-    print("g updated")
+    # print("g updated")
     network.g_a += -(network.g_a / TAU_A) + network.S * network.fired * ZETA
 end
 
@@ -133,12 +121,12 @@ end
 
 function update_g_c!(network::CpuConductanceIzhNetwork)
     # TODO: Consider initializing "ones(N, N)" in struct -- when confirmed correct functionality 
-    network.g_c += -(network.g_c / TAU_C) + ones(network.N, network.N) * network.fired * ZETA
+    network.g_c += -(network.g_c / TAU_C) + network.ones_matrix * network.fired * ZETA
 end
 
 function update_g_d!(network::CpuConductanceIzhNetwork)
     # Similar to update_g_c()
-    network.g_d += -(network.g_d / TAU_D) + ones(network.N, network.N) * network.fired * ZETA
+    network.g_d += -(network.g_d / TAU_D) + network.ones_matrix * network.fired * ZETA
 end
 
 function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedConductanceIzhNetwork)
@@ -190,4 +178,113 @@ function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedConductance
     trace.e_trace = trace.e_trace .- trace.e_trace/trace.e_decay
 end
 
+function weight_update!(network::CpuConductanceIzhNetwork, trace::CpuEligibilityTrace, reward::Reward)
+    network.S = min.(max.(network.S + reward.reward * trace.e_trace, network.S_lb), network.S_ub)
+    return network
+end
 
+function reset_network!(network::CpuConductanceIzhNetwork)
+    network.v = network.v .* 0 .- 65.0
+    network.u = network.params.b .* network.v
+end
+
+function reset_trace!(trace::CpuEligibilityTrace)
+    trace.pre_trace = trace.pre_trace * 0
+    trace.post_trace = trace.post_trace * 0
+    trace.e_trace = trace.e_trace * 0
+end
+
+
+mutable struct CpuMaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanceIzhNetwork
+    const N::Integer
+    params::IzhParameters{Vector{T}}
+    v::Vector{T}
+    u::Vector{T}
+    S::Matrix{T}
+    S_ub::Matrix{T}
+    S_lb::Matrix{T}
+    mask::Matrix{Bool}
+    fired::Vector{Bool}
+    g_a::Vector{T}
+    g_b::Vector{T}
+    g_c::Vector{T}
+    g_d::Vector{T}
+    ones_matrix::Matrix{T}
+
+    function CpuMaskedConductanceIzhNetwork(N::Integer, 
+                                params::IzhParameters{Vector{T}},
+                                v::Vector{T}, 
+                                u::Vector{T}, 
+                                S::Matrix{T}, 
+                                S_ub::Matrix{T}, 
+                                S_lb::Matrix{T}, 
+                                mask::Matrix{Bool},
+                                fired::AbstractVector{Bool},
+                                g_a::Vector{T},
+                                g_b::Vector{T},
+                                g_c::Vector{T},
+                                g_d::Vector{T}) where T <: AbstractFloat
+        @assert length(params.a) == N
+        @assert length(v) == length(u) == N
+        @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
+        @assert size(S) == size(S_lb) == size(S_ub) == size(mask) == (N, N)
+        @assert length(fired) == N
+
+        ones_matrix = ones(T, N, N)
+        return new{T}(N, params, v, u, S, S_ub, S_lb, mask, fired, g_a, g_b, g_c, g_d, ones_matrix) 
+    end
+end
+
+function step_trace!(trace::CpuEligibilityTrace, network::CpuMaskedConductanceIzhNetwork)
+
+    len_post = length(trace.post_trace)
+    len_pre = length(trace.pre_trace)
+
+    trace.pre_trace = trace.pre_trace - trace.pre_trace/trace.pre_decay + network.fired * trace.pre_increment
+    trace.post_trace = trace.post_trace - trace.post_trace/trace.post_decay + network.fired * trace.post_increment
+
+    @inbounds for i in 1:len_post
+        @inbounds @simd for j in 1:len_pre
+
+
+            # i is row index, j is column index, so...
+            #
+            #
+            # Pre-synaptic input (indexed with j)
+            #     |
+            #     v
+            # . . . . .
+            # . . . . . --> Post-synaptic output (indexed with i)
+            # . . . . .
+            
+            # Check if presynaptic neuron is inhibitory
+
+            # Check if the neurons have a synpatic connection j -> i
+            # remember wonky row/column indexing makes things "backwards"
+            if network.mask[i,j]
+
+                # We add the *opposite* trace given a neural spike
+                # So if post-synaptic neuron i spikes, we add the trace for the 
+                # pre-synaptic neuron to the eligibility trace
+
+                if network.fired[i]
+                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.pre_trace[j]
+                end
+
+                # And if pre-synaptic neuron j spikes, we add the trace for the 
+                # post-synaptic neuron to the eligibility trace
+
+                if network.fired[j]
+                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.post_trace[i]
+                end
+
+                # each trace will decay according to the decay parameter
+                
+            end
+
+        end
+    end
+
+    # each trace will decay according to the decay parameter
+    trace.e_trace = trace.e_trace - trace.e_trace/trace.e_decay
+end

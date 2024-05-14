@@ -19,6 +19,22 @@ mutable struct CudaEligibilityTrace{T<:AbstractFloat}
     const e_decay::T
 end
 
+struct CudaIzhParameters{T<:CuArray{<:AbstractFloat}}
+    # time scale recovery parameter
+    a::T
+    # sensitivity to sub-threshold membrane fluctuations (greater values couple v and u)
+    b::T
+    # post-spike reset value of membrane potential v
+    c::T
+    # post-spike reset of recovery variable u
+    d::T
+
+    function CudaIzhParameters(a::T, b::T, c::T, d::T) where T <: CuArray{<:AbstractFloat}
+        @assert length(a) == length(b) == length(c) == length(d)
+        new{T}(a, b, c, d)
+    end
+end
+
 
 #function step_trace!(trace::EligibilityTrace, firings::CuArray{Bool, 1}, mask::CuArray{Bool, 2})
 #    trace.pre_trace .= trace.pre_trace .- trace.pre_trace ./ trace.pre_decay .+ firings .* trace.pre_increment
@@ -128,10 +144,6 @@ function step_network!(in_voltage::CuArray{<:AbstractFloat, 1}, network::CudaUnm
     # calculate new input voltages given presently firing neurons
     in_voltage .= in_voltage .+ (network.S * network.fired)
 
-    # Calculate total synaptic currents
-    # TODO: rewrite I_syn as CuArray
-
-    # TODO: subtract I_syn from voltages
     # update voltages (twice for stability)
     network.v .= network.v .+ 0.5 * (0.04 * (network.v .^ 2) .+ 5 .* network.v .+ 140 .- network.u .+ in_voltage)
     network.v .= network.v .+ 0.5 * (0.04 * (network.v .^ 2) .+ 5 .* network.v .+ 140 .- network.u .+ in_voltage)
@@ -165,34 +177,6 @@ function step_network!(in_voltage::CuArray{<:AbstractFloat, 1}, network::CudaMas
     network.u .= network.u .+ network.a .* (network.b .* network.v .- network.u)
 
     return network
-end
-
-function calc_synaptic_current(network::CudaIzhNetwork)
-    # Calculate the total synaptic current (I_syn) of the ith neuron
-    I_syn::Vector{T} = network.g_a * (network.v .- 0)
-                    .+ network.g_b * (((network.v .+ 80) / .60) .^ 2) / (1 .+ ((network.v .+ 80) / 60) .^2) * (network.v .- 0)
-                    .+ network.g_c * (network.v .+ 70)
-                    .+ network.g_d * (network.v .+ 90)
-    return I_syn
-end
-
-function update_g_a!(network::CudaIzhNetwork)
-    network.g_a += -(network.g_a / TAU_A) + network.S * network.fired' * ZETA
-end
-
-function update_g_b!(network::CudaIzhNetwork)
-    # Similar to update_g_a()
-    network.g_b += -(network.g_b / TAU_B) + network.S * network.fired' * ZETA
-end
-
-function update_g_c!(network::CudaIzhNetwork)
-    # TODO: Consider initializing "ones(N, N)" in struct -- when confirmed correct functionality 
-    network.g_c += -(network.g_c / TAU_C) + ones(network.N, network.N) * network.fired' * ZETA
-end
-
-function update_g_d!(network::CudaIzhNetwork)
-    # Similar to update_g_c()
-    network.g_d += -(network.g_d / TAU_D) + ones(network.N, network.N) * network.fired' * ZETA
 end
 
 function step_trace!(trace::CudaEligibilityTrace, network::CudaMaskedIzhNetwork)
