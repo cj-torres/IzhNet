@@ -93,8 +93,8 @@ function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuConducta
 
     update_g_a!(network)
     update_g_b!(network)
-    update_g_c!(network)
-    update_g_d!(network)
+    #update_g_c!(network)
+    #update_g_d!(network)
     
     return network
 end
@@ -111,22 +111,22 @@ end
 
 function update_g_a!(network::CpuConductanceIzhNetwork)
     # print("g updated")
-    network.g_a += -(network.g_a / TAU_A) + network.S * network.fired * ZETA
+    network.g_a += -(network.g_a / TAU_A) + network.S * network.fired * ZETA #* ~network.is_inhibitory
 end
 
 function update_g_b!(network::CpuConductanceIzhNetwork)
     # Similar to update_g_a()
-    network.g_b += -(network.g_b / TAU_B) + network.S * network.fired * ZETA
+    network.g_b += -(network.g_b / TAU_B) + network.S * network.fired * ZETA #* ~network.is_inhibitory
 end
 
 function update_g_c!(network::CpuConductanceIzhNetwork)
     # TODO: Consider initializing "ones(N, N)" in struct -- when confirmed correct functionality 
-    network.g_c += -(network.g_c / TAU_C) + network.ones_matrix * network.fired * ZETA
+    network.g_c += -(network.g_c / TAU_C) + network.ones_matrix * network.fired * ZETA #*network.is_inhibitory
 end
 
 function update_g_d!(network::CpuConductanceIzhNetwork)
     # Similar to update_g_c()
-    network.g_d += -(network.g_d / TAU_D) + network.ones_matrix * network.fired * ZETA
+    network.g_d += -(network.g_d / TAU_D) + network.ones_matrix * network.fired * ZETA #*network.is_inhibitory
 end
 
 function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedConductanceIzhNetwork)
@@ -186,12 +186,6 @@ end
 function reset_network!(network::CpuConductanceIzhNetwork)
     network.v = network.v .* 0 .- 65.0
     network.u = network.params.b .* network.v
-end
-
-function reset_trace!(trace::CpuEligibilityTrace)
-    trace.pre_trace = trace.pre_trace * 0
-    trace.post_trace = trace.post_trace * 0
-    trace.e_trace = trace.e_trace * 0
 end
 
 
