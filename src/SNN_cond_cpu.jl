@@ -30,9 +30,11 @@ mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConducta
     S_ub::Matrix{T}
     S_lb::Matrix{T}
 
-
     # boolean of is-fired
     fired::Vector{Bool}
+
+    # True if inhibitory neuron
+    is_inhibitory::Vector{Bool}
 
     # conductances for receptors
     g_a::Vector{T}
@@ -52,6 +54,7 @@ mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConducta
                                 S_ub::Matrix{T}, 
                                 S_lb::Matrix{T}, 
                                 fired::AbstractVector{Bool},
+                                is_inhibitory::AbstractVector{Bool},
                                 g_a::Vector{T},
                                 g_b::Vector{T},
                                 g_c::Vector{T},
@@ -60,10 +63,10 @@ mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConducta
         @assert length(v) == length(u) == N
         @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
         @assert size(S) == size(S_lb) == size(S_ub) == (N, N)
-        @assert length(fired) == N
+        @assert length(fired) == length(is_inhibitory) == N
 
         ones_matrix = ones(T, N, N)
-        return new{T}(N, params, v, u, S, S_ub, S_lb, fired, g_a, g_b, g_c, g_d, ones_matrix) 
+        return new{T}(N, params, v, u, S, S_ub, S_lb, fired, is_inhibitory, g_a, g_b, g_c, g_d, ones_matrix) 
     end
 end
 
@@ -110,23 +113,23 @@ function calc_synaptic_current(network::CpuConductanceIzhNetwork)
 end
 
 function update_g_a!(network::CpuConductanceIzhNetwork)
-    # print("g updated")
-    network.g_a += -(network.g_a / TAU_A) + network.S * network.fired * ZETA
+    # Update g_a for excitatory neurons only
+    network.g_a .= network.g_a .- (network.g_a / TAU_A) .+ (network.S * (network.fired .* .!network.is_inhibitory) * ZETA)
 end
 
 function update_g_b!(network::CpuConductanceIzhNetwork)
-    # Similar to update_g_a()
-    network.g_b += -(network.g_b / TAU_B) + network.S * network.fired * ZETA
+    # Update g_b for excitatory neurons only
+    network.g_b .= network.g_b .- (network.g_b / TAU_B) .+ (network.S * (network.fired .* .!network.is_inhibitory) * ZETA)
 end
 
 function update_g_c!(network::CpuConductanceIzhNetwork)
-    # TODO: Consider initializing "ones(N, N)" in struct -- when confirmed correct functionality 
-    network.g_c += -(network.g_c / TAU_C) + network.ones_matrix * network.fired * ZETA
+    # Update g_c for inhibitory neurons only
+    network.g_c .= network.g_c .- (network.g_c / TAU_C) .+ (network.ones_matrix * (network.fired .* network.is_inhibitory) * ZETA)
 end
 
 function update_g_d!(network::CpuConductanceIzhNetwork)
-    # Similar to update_g_c()
-    network.g_d += -(network.g_d / TAU_D) + network.ones_matrix * network.fired * ZETA
+    # Update g_d for inhibitory neurons only
+    network.g_d .= network.g_d .- (network.g_d / TAU_D) .+ (network.ones_matrix * (network.fired .* network.is_inhibitory) * ZETA)
 end
 
 function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedConductanceIzhNetwork)
@@ -205,6 +208,7 @@ mutable struct CpuMaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanc
     S_lb::Matrix{T}
     mask::Matrix{Bool}
     fired::Vector{Bool}
+    is_inhibitory::Vector{Bool}
     g_a::Vector{T}
     g_b::Vector{T}
     g_c::Vector{T}
@@ -220,6 +224,7 @@ mutable struct CpuMaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanc
                                 S_lb::Matrix{T}, 
                                 mask::Matrix{Bool},
                                 fired::AbstractVector{Bool},
+                                is_inhibitory::AbstractVector{Bool},
                                 g_a::Vector{T},
                                 g_b::Vector{T},
                                 g_c::Vector{T},
@@ -228,10 +233,10 @@ mutable struct CpuMaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanc
         @assert length(v) == length(u) == N
         @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
         @assert size(S) == size(S_lb) == size(S_ub) == size(mask) == (N, N)
-        @assert length(fired) == N
+        @assert length(fired) == length(in_inhibitory) == N
 
         ones_matrix = ones(T, N, N)
-        return new{T}(N, params, v, u, S, S_ub, S_lb, mask, fired, g_a, g_b, g_c, g_d, ones_matrix) 
+        return new{T}(N, params, v, u, S, S_ub, S_lb, mask, fired, is_inhibitory, g_a, g_b, g_c, g_d, ones_matrix) 
     end
 end
 
