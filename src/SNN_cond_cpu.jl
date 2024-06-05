@@ -96,8 +96,8 @@ function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuConducta
 
     update_g_a!(network)
     update_g_b!(network)
-    update_g_c!(network)
-    update_g_d!(network)
+    #update_g_c!(network)
+    #update_g_d!(network)
     
     return network
 end
@@ -189,12 +189,6 @@ end
 function reset_network!(network::CpuConductanceIzhNetwork)
     network.v = network.v .* 0 .- 65.0
     network.u = network.params.b .* network.v
-end
-
-function reset_trace!(trace::CpuEligibilityTrace)
-    trace.pre_trace = trace.pre_trace * 0
-    trace.post_trace = trace.post_trace * 0
-    trace.e_trace = trace.e_trace * 0
 end
 
 
