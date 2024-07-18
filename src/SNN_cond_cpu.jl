@@ -21,7 +21,8 @@ mutable struct CpuSimpleEligibilityTrace{T<:AbstractFloat}
 
     dw::Matrix{T}
     t_fired::Vector{T}
-    
+    const A_negative
+    const A_positive
 
     # Parameters for pre/post incrementing and decay
     # 
@@ -40,58 +41,41 @@ end
 
 function CpuSimpleEligibilityTrace(S::Matrix)
     # will make trace with dw and t_fired of size S
+    
 end
 
 function step_trace!(trace::CpuSimpleEligibilityTrace, network::CpuMaskedConductanceIzhNetwork)
-
-
-
+    trace.dw = trace.dw - (trace.dw .- ALPHA).*1e-6
     
+    for i in 1:length(network.fired)
+        if network.fired[i]
+            trace.t_fired[i] = 0
+            for j in 1:length(network.fired)
+                if network.is_inhibitory[i] & network.is_inhibitory[j]
+                    # fully reversed branch
 
-    @inbounds for i in 1:len_post
-        @inbounds @simd for j in 1:len_pre
+                    # trace.dw = network.is_inhibitory[i] * trace_negative_equation + ...
+                    # in trace.dw[i,j] j is pre_synaptic to i
 
+                    # if i fired
+                    trace.dw[i, j] = A_positive * exp(trace.t_fired[j])
+                    trace.dw[j, i] = A_negative * exp(trace.t_fired[j])
+                elseif network.is_inhibitory[j] || network.is_inhibitory[i]
+                    # reverse when j or i is pre-synaptic
+                    trace.dw[i, j] = A_negative * exp(trace.t_fired[j])
+                    trace.dw[j, i] = A_negative * exp(trace.t_fired[j])
+                else
+                    # normal branch
+                    trace.dw[i, j] = A_negative * exp(trace.t_fired[j])
+                    trace.dw[j, i] = A_positive * exp(trace.t_fired[j])
 
-            # i is row index, j is column index, so...
-            #
-            #
-            # Pre-synaptic input (indexed with j)
-            #     |
-            #     v
-            # . . . . .
-            # . . . . . --> Post-synaptic output (indexed with i)
-            # . . . . .
-            
-            # Check if presynaptic neuron is inhibitory
-
-            # Check if the neurons have a synpatic connection j -> i
-            # remember wonky row/column indexing makes things "backwards"
-            if network.mask[i,j]
-
-                # We add the *opposite* trace given a neural spike
-                # So if post-synaptic neuron i spikes, we add the trace for the 
-                # pre-synaptic neuron to the eligibility trace
-
-                if network.fired[i]
-                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.pre_trace[j]
                 end
-
-                # And if pre-synaptic neuron j spikes, we add the trace for the 
-                # post-synaptic neuron to the eligibility trace
-
-                if network.fired[j]
-                    trace.e_trace[i, j] = trace.e_trace[i, j] + trace.constants[i,j]*trace.post_trace[i]
-                end
-
-                # each trace will decay according to the decay parameter
-                
             end
-
         end
     end
+    
+    trace.t_fired = trace.t_fired .+ 1
 
-    # each trace will decay according to the decay parameter
-    trace.e_trace = trace.e_trace - trace.e_trace/trace.e_decay
 end
 
 
@@ -324,6 +308,11 @@ function step_trace!(trace::CpuEligibilityTrace, network::CpuUnmaskedConductance
 end
 
 function weight_update!(network::CpuConductanceIzhNetwork, trace::CpuEligibilityTrace, reward::Reward)
+    network.S = min.(max.(network.S + reward.reward * trace.e_trace, network.S_lb), network.S_ub)
+    return network
+end
+
+function weight_update!(network::CpuConductanceIzhNetwork, trace::CpuSimpleEligibilityTrace, reward::Reward)
     network.S = min.(max.(network.S + reward.reward * trace.e_trace, network.S_lb), network.S_ub)
     return network
 end
