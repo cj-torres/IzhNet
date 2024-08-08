@@ -21,8 +21,8 @@ mutable struct CpuSimpleEligibilityTrace{T<:AbstractFloat}
 
     dw::Matrix{T}
     t_fired::Vector{T}
-    const A_negative
-    const A_positive
+    const A_negative::T
+    const A_positive::T
 
     # Parameters for pre/post incrementing and decay
     # 
@@ -39,9 +39,11 @@ mutable struct CpuSimpleEligibilityTrace{T<:AbstractFloat}
     #const e_decay::T
 end
 
-function CpuSimpleEligibilityTrace(S::Matrix)
-    # will make trace with dw and t_fired of size S
-    
+function CpuSimpleEligibilityTrace(S::Matrix{T}, A_negative::T, A_positive::T) where T <: AbstractFloat
+    N = size(S, 1)
+    dw = zeros(T, N, N)
+    t_fired = zeros(T, N)
+    return CpuSimpleEligibilityTrace{T}(dw, t_fired, A_negative, A_positive)
 end
 
 function step_trace!(trace::CpuSimpleEligibilityTrace, network::CpuMaskedConductanceIzhNetwork)
@@ -313,7 +315,7 @@ function weight_update!(network::CpuConductanceIzhNetwork, trace::CpuEligibility
 end
 
 function weight_update!(network::CpuConductanceIzhNetwork, trace::CpuSimpleEligibilityTrace, reward::Reward)
-    network.S = min.(max.(network.S + reward.reward * trace.e_trace, network.S_lb), network.S_ub)
+    network.S = network.S .+ trace.dw
     return network
 end
 
