@@ -39,6 +39,108 @@ mutable struct CpuSimpleEligibilityTrace{T<:AbstractFloat}
     #const e_decay::T
 end
 
+mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanceIzhNetwork
+        
+    # number of neurons
+    const N::Integer
+
+    # params: a, b, c, d
+    params::IzhParameters{Vector{T}}
+
+    # membrane potential and recovery variable, used in Izhikevich system of equations
+    v::Vector{T}
+    u::Vector{T}
+
+    # synaptic weights
+    S::Matrix{T}
+
+    # bounds used for clamping, UB should generally be 0 for inhibitory networks
+    # LB should be 0 for excitatory networks
+    S_ub::Matrix{T}
+    S_lb::Matrix{T}
+
+    # boolean of is-fired
+    fired::Vector{Bool}
+
+    # True if inhibitory neuron
+    is_inhibitory::Vector{Bool}
+
+    # conductances for receptors
+    g_a::Vector{T}
+    g_b::Vector{T}
+    g_c::Vector{T}
+    g_d::Vector{T}
+
+    # for g updates
+    ones_matrix::Matrix{T}
+
+
+    function CpuUnmaskedConductanceIzhNetwork(N::Integer, 
+                                params::IzhParameters{Vector{T}},
+                                v::Vector{T}, 
+                                u::Vector{T}, 
+                                S::Matrix{T}, 
+                                S_ub::Matrix{T}, 
+                                S_lb::Matrix{T}, 
+                                fired::AbstractVector{Bool},
+                                is_inhibitory::AbstractVector{Bool},
+                                g_a::Vector{T},
+                                g_b::Vector{T},
+                                g_c::Vector{T},
+                                g_d::Vector{T}) where T <: AbstractFloat
+        @assert length(params.a) == N
+        @assert length(v) == length(u) == N
+        @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
+        @assert size(S) == size(S_lb) == size(S_ub) == (N, N)
+        @assert length(fired) == length(is_inhibitory) == N
+
+        ones_matrix = ones(T, N, N)
+        return new{T}(N, params, v, u, S, S_ub, S_lb, fired, is_inhibitory, g_a, g_b, g_c, g_d, ones_matrix) 
+    end
+end
+
+mutable struct CpuMaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanceIzhNetwork
+    const N::Integer
+    params::IzhParameters{Vector{T}}
+    v::Vector{T}
+    u::Vector{T}
+    S::Matrix{T}
+    S_ub::Matrix{T}
+    S_lb::Matrix{T}
+    mask::Matrix{Bool}
+    fired::Vector{Bool}
+    is_inhibitory::Vector{Bool}
+    g_a::Vector{T}
+    g_b::Vector{T}
+    g_c::Vector{T}
+    g_d::Vector{T}
+    ones_matrix::Matrix{T}
+
+    function CpuMaskedConductanceIzhNetwork(N::Integer, 
+                                params::IzhParameters{Vector{T}},
+                                v::Vector{T}, 
+                                u::Vector{T}, 
+                                S::Matrix{T}, 
+                                S_ub::Matrix{T}, 
+                                S_lb::Matrix{T}, 
+                                mask::Matrix{Bool},
+                                fired::AbstractVector{Bool},
+                                is_inhibitory::AbstractVector{Bool},
+                                g_a::Vector{T},
+                                g_b::Vector{T},
+                                g_c::Vector{T},
+                                g_d::Vector{T}) where T <: AbstractFloat
+        @assert length(params.a) == N
+        @assert length(v) == length(u) == N
+        @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
+        @assert size(S) == size(S_lb) == size(S_ub) == size(mask) == (N, N)
+        @assert length(fired) == length(in_inhibitory) == N
+
+        ones_matrix = ones(T, N, N)
+        return new{T}(N, params, v, u, S, S_ub, S_lb, mask, fired, is_inhibitory, g_a, g_b, g_c, g_d, ones_matrix) 
+    end
+end
+
 function CpuSimpleEligibilityTrace(S::Matrix{T}, A_negative::T, A_positive::T) where T <: AbstractFloat
     N = size(S, 1)
     dw = zeros(T, N, N)
@@ -46,7 +148,7 @@ function CpuSimpleEligibilityTrace(S::Matrix{T}, A_negative::T, A_positive::T) w
     return CpuSimpleEligibilityTrace{T}(dw, t_fired, A_negative, A_positive)
 end
 
-function step_trace!(trace::CpuSimpleEligibilityTrace, network::CpuMaskedConductanceIzhNetwork)
+function step_trace!(trace::CpuSimpleEligibilityTrace, network::CpuUnmaskedConductanceIzhNetwork) # Make a separate masked version for step_trace
     trace.dw = trace.dw - (trace.dw .- ALPHA).*1e-6
     
     for i in 1:length(network.fired)
@@ -60,16 +162,16 @@ function step_trace!(trace::CpuSimpleEligibilityTrace, network::CpuMaskedConduct
                     # in trace.dw[i,j] j is pre_synaptic to i
 
                     # if i fired
-                    trace.dw[i, j] = A_positive * exp(trace.t_fired[j])
-                    trace.dw[j, i] = A_negative * exp(trace.t_fired[j])
+                    trace.dw[i, j] = trace.A_positive * exp(trace.t_fired[j])
+                    trace.dw[j, i] = trace.A_negative * exp(trace.t_fired[j])
                 elseif network.is_inhibitory[j] || network.is_inhibitory[i]
                     # reverse when j or i is pre-synaptic
-                    trace.dw[i, j] = A_negative * exp(trace.t_fired[j])
-                    trace.dw[j, i] = A_negative * exp(trace.t_fired[j])
+                    trace.dw[i, j] = trace.A_negative * exp(trace.t_fired[j])
+                    trace.dw[j, i] = trace.A_negative * exp(trace.t_fired[j])
                 else
                     # normal branch
-                    trace.dw[i, j] = A_negative * exp(trace.t_fired[j])
-                    trace.dw[j, i] = A_positive * exp(trace.t_fired[j])
+                    trace.dw[i, j] = trace.A_negative * exp(trace.t_fired[j])
+                    trace.dw[j, i] = trace.A_positive * exp(trace.t_fired[j])
 
                 end
             end
@@ -135,68 +237,6 @@ function step_trace!(trace::CpuEligibilityTrace, network::CpuMaskedConductanceIz
     trace.e_trace = trace.e_trace - trace.e_trace/trace.e_decay
 end
 
-
-
-
-mutable struct CpuUnmaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanceIzhNetwork
-        
-    # number of neurons
-    const N::Integer
-
-    # params: a, b, c, d
-    params::IzhParameters{Vector{T}}
-
-    # membrane potential and recovery variable, used in Izhikevich system of equations
-    v::Vector{T}
-    u::Vector{T}
-
-    # synaptic weights
-    S::Matrix{T}
-
-    # bounds used for clamping, UB should generally be 0 for inhibitory networks
-    # LB should be 0 for excitatory networks
-    S_ub::Matrix{T}
-    S_lb::Matrix{T}
-
-    # boolean of is-fired
-    fired::Vector{Bool}
-
-    # True if inhibitory neuron
-    is_inhibitory::Vector{Bool}
-
-    # conductances for receptors
-    g_a::Vector{T}
-    g_b::Vector{T}
-    g_c::Vector{T}
-    g_d::Vector{T}
-
-    # for g updates
-    ones_matrix::Matrix{T}
-
-
-    function CpuUnmaskedConductanceIzhNetwork(N::Integer, 
-                                params::IzhParameters{Vector{T}},
-                                v::Vector{T}, 
-                                u::Vector{T}, 
-                                S::Matrix{T}, 
-                                S_ub::Matrix{T}, 
-                                S_lb::Matrix{T}, 
-                                fired::AbstractVector{Bool},
-                                is_inhibitory::AbstractVector{Bool},
-                                g_a::Vector{T},
-                                g_b::Vector{T},
-                                g_c::Vector{T},
-                                g_d::Vector{T}) where T <: AbstractFloat
-        @assert length(params.a) == N
-        @assert length(v) == length(u) == N
-        @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
-        @assert size(S) == size(S_lb) == size(S_ub) == (N, N)
-        @assert length(fired) == length(is_inhibitory) == N
-
-        ones_matrix = ones(T, N, N)
-        return new{T}(N, params, v, u, S, S_ub, S_lb, fired, is_inhibitory, g_a, g_b, g_c, g_d, ones_matrix) 
-    end
-end
 
 function step_network!(in_voltage::Vector{<:AbstractFloat}, network::CpuConductanceIzhNetwork)
     network.fired = network.v .>= 30
@@ -315,7 +355,7 @@ function weight_update!(network::CpuConductanceIzhNetwork, trace::CpuEligibility
 end
 
 function weight_update!(network::CpuConductanceIzhNetwork, trace::CpuSimpleEligibilityTrace, reward::Reward)
-    network.S = network.S .+ trace.dw
+    network.S = min.(max.(network.S + reward.reward * trace.dw, network.S_lb), network.S_ub)
     return network
 end
 
@@ -324,46 +364,4 @@ function reset_network!(network::CpuConductanceIzhNetwork)
     network.u = network.params.b .* network.v
 end
 
-
-mutable struct CpuMaskedConductanceIzhNetwork{T<:AbstractFloat} <: CpuConductanceIzhNetwork
-    const N::Integer
-    params::IzhParameters{Vector{T}}
-    v::Vector{T}
-    u::Vector{T}
-    S::Matrix{T}
-    S_ub::Matrix{T}
-    S_lb::Matrix{T}
-    mask::Matrix{Bool}
-    fired::Vector{Bool}
-    is_inhibitory::Vector{Bool}
-    g_a::Vector{T}
-    g_b::Vector{T}
-    g_c::Vector{T}
-    g_d::Vector{T}
-    ones_matrix::Matrix{T}
-
-    function CpuMaskedConductanceIzhNetwork(N::Integer, 
-                                params::IzhParameters{Vector{T}},
-                                v::Vector{T}, 
-                                u::Vector{T}, 
-                                S::Matrix{T}, 
-                                S_ub::Matrix{T}, 
-                                S_lb::Matrix{T}, 
-                                mask::Matrix{Bool},
-                                fired::AbstractVector{Bool},
-                                is_inhibitory::AbstractVector{Bool},
-                                g_a::Vector{T},
-                                g_b::Vector{T},
-                                g_c::Vector{T},
-                                g_d::Vector{T}) where T <: AbstractFloat
-        @assert length(params.a) == N
-        @assert length(v) == length(u) == N
-        @assert length(g_a) == length(g_b) == length(g_c) == length(g_d) == N
-        @assert size(S) == size(S_lb) == size(S_ub) == size(mask) == (N, N)
-        @assert length(fired) == length(in_inhibitory) == N
-
-        ones_matrix = ones(T, N, N)
-        return new{T}(N, params, v, u, S, S_ub, S_lb, mask, fired, is_inhibitory, g_a, g_b, g_c, g_d, ones_matrix) 
-    end
-end
 
